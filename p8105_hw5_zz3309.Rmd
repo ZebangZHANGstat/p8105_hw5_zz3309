@@ -1,0 +1,192 @@
+---
+title: "P8105_hw5_zz3309"
+author: "Zebang Zhang"
+date: 2024-11-10
+output: github_document
+---
+
+```{r}
+library(broom)
+library(tidyverse)
+```
+
+# Problem 1
+
+First, I wrote a simulation function and ran the simulation.
+
+```{r}
+set.seed(1)
+
+birthday_simulation <- function(n) {
+  birthdays <- sample(1:365, n, replace = TRUE) 
+  return(any(duplicated(birthdays)))
+}
+
+simulation_num <- 10000 
+group_sizes <- 2:50    
+probabilities <- numeric(length(group_sizes))
+
+for (i in seq_along(group_sizes)) {
+  group_size <- group_sizes[i]
+  results <- replicate(simulation_num, birthday_simulation(group_size))
+  probabilities[i] <- mean(results) 
+}
+
+results_table <- data.frame(group_size = group_sizes, probability = probabilities)
+print(results_table)
+
+plot(group_sizes, probabilities, type = "o", col = "blue",
+     xlab = "group size", ylab = "probability that at least two people share a birthday")
+```
+
+From the plot, we can see the probability that at least two people share a birthday increases as group size increases. Although initially, the probability is small, when group size reach about 30, the probability is above 70%, and when group size reach 50, the probability is very close to 1, meaning that it is much possible to see at least two people share a birthday.
+
+# Problem 2
+
+First, write the simulation function and run the simulations.
+
+```{r}
+set.seed(1)     
+n <- 30           
+sigma <- 5        
+mu_values <- 0:6
+
+run_simulation <- function(mu, n, sigma, n_simulations = 5000, alpha = 0.05) {
+  
+  estimates <- numeric(n_simulations)
+  p_values <- numeric(n_simulations)
+  
+  for (i in 1:n_simulations) {
+    x <- rnorm(n, mean = mu, sd = sigma)
+    test_result <- t.test(x, mu = 0)
+    test_tidy <- tidy(test_result)
+    estimates[i] <- test_tidy$estimate
+    p_values[i] <- test_tidy$p.value
+  }
+  
+  power <- mean(p_values < alpha)
+  mean_estimate <- mean(estimates)
+  mean_estimate_rejected <- mean(estimates[p_values < alpha])
+  
+  return(list(
+    mu = mu, 
+    power = power, 
+    mean_estimate = mean_estimate, 
+    mean_estimate_rejected = mean_estimate_rejected,
+    estimates = estimates, 
+    p_values = p_values
+  ))
+}
+
+simulation_results <- lapply(mu_values, run_simulation, n = n, sigma = sigma)
+```
+
+```{r}
+results_df <- do.call(rbind, lapply(simulation_results, function(x) {
+  data.frame(mu = x$mu, power = x$power, mean_estimate = x$mean_estimate, 
+             mean_estimate_rejected = x$mean_estimate_rejected)
+}))
+print(results_df)
+```
+
+Then make plots to the simulation results.
+
+```{r}
+ggplot(results_df, aes(x = mu, y = power)) +
+  geom_line(color = "orange") +
+  geom_point(color = "orange") +
+  labs(x = "real μ", y = "power(probability that a false null hypothesis is rejected)") +
+  theme_minimal()
+
+ggplot(results_df, aes(x = mu)) +
+  geom_line(aes(y = mean_estimate, color = "Estimated μ"), linetype = "solid") +
+  geom_point(aes(y = mean_estimate, color = "Estimated μ")) +
+  geom_line(aes(y = mean_estimate_rejected, color = "Estimated μ when rejecting the null"), linetype = "dashed") +
+  geom_point(aes(y = mean_estimate_rejected, color = "Estimated μ when rejecting the null")) +
+  labs(x = "real μ", y = "the average estimate of μ") +
+  theme_minimal() +
+  scale_color_manual(values = c("Estimated μ" = "red", 
+                                "Estimated μ when rejecting the null" = "blue")) +
+  guides(color = guide_legend(title = "Estimation type"))
+```
+
+From the first plot, we can see that the power of the test increases as the real μ increases, this is because the real μ value gets farther from value 0. So effect size and power have a positive correlation.
+
+From the second plot, we can see that the sample averages of μ across tests for which the null is rejected are not always approximately equal to the true value of μ. When real u equals 1, 2, and 3, the estimated μ when rejecting the null is not approximately equal to the real μ. This is because for cases where the effect size is small, the noise in the sample data is large, if we exclude the tests for which the null is not rejected, estimates of the mean may be biased. Since we do the iteration for 5000 times, which is a large number, the estimated μ will always close to the real μ if we just consider all the tests no matter if its null is rejected.
+
+# Problem 3 
+
+```{r}
+homicide_data <- read.csv("homicide-data.csv")
+
+str(homicide_data)
+
+homicide_data |>
+  distinct(disposition)
+```
+
+The raw data has 12 columns (variables). It records the detailed information of homicides in different states and cities, including the date when the homicide happened, the location where the homicide happened, the victim's name, race, age, sex, and the disposition ("Closed without arrest", "Closed by arrest", "Open/No arrest") of the homicide.
+
+```{r}
+#Create a city_state variable and then summarize within cities to obtain the total number of homicides and the number of unsolved homicides
+
+homicide_data <- homicide_data %>%
+  mutate(city_state = paste(city, state, sep = ", "))
+
+summary_data <- homicide_data %>%
+  group_by(city_state) %>%
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest")))
+
+summary_data
+```
+
+```{r}
+baltimore_data <- summary_data %>%
+  filter(city_state == "Baltimore, MD")
+
+baltimore_data
+```
+
+```{r}
+#For the city of Baltimore, MD, use the prop.test function to estimate the proportion of homicides that are unsolved
+
+prop_baltimore <- prop.test(baltimore_data$unsolved_homicides, baltimore_data$total_homicides)
+#(prop_baltimore is saved as the output of prop.test)
+
+baltimore_prop_ci <- tidy(prop_baltimore) %>%
+  select(estimate, conf.low, conf.high)
+
+baltimore_prop_ci
+```
+
+For the city of Baltimore, MD, the estimated proportion of homicides that are unsolved is `r baltimore_prop_ci$estimate`, the confidence interval is (`r baltimore_prop_ci$conf.low`, `r baltimore_prop_ci$conf.high`).
+
+```{r}
+#extract the proportion of unsolved homicides and the confidence interval for each city
+city_proportions <- summary_data %>%
+  mutate(
+    prop_test = pmap(list(unsolved_homicides, total_homicides), prop.test),
+    tidy_results = map(prop_test, tidy)
+  ) %>%
+  unnest(tidy_results) %>%
+  select(city_state, estimate, conf.low, conf.high)
+
+city_proportions
+```
+
+```{r}
+#Create a plot that shows the estimates and CIs for each city
+ggplot(city_proportions, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
+  coord_flip() +
+  labs(
+    title = "Proportion of unsolved homicides by city",
+    x = "city_state",
+    y = "proportion of unsolved homicides"
+  ) +
+  theme_minimal()
+```
+
